@@ -1,10 +1,27 @@
+import os
+from dotenv import load_dotenv
+
+# Load .env file when running locally. In Cloud Run, env vars are injected
+# directly by the platform so load_dotenv() simply finds nothing and moves on.
+load_dotenv()
+
 DB_CONFIG = {
-    'host': 'localhost',
-    'dbname': 'Cricket',
-    'user': 'postgres',
-    'password': 'B@rnat028',
-    'port': 5432,
+    'host':     os.environ.get('DB_HOST',     'localhost'),
+    'dbname':   os.environ.get('DB_NAME',     'Cricket'),
+    'user':     os.environ.get('DB_USER',     'postgres'),
+    'password': os.environ.get('DB_PASSWORD', ''),
+    'port':     int(os.environ.get('DB_PORT', '5432')),
 }
+
+# ML model path
+MODEL_PATH = os.environ.get('MODEL_PATH', 'cricket_match_predictor.pkl')
+
+# CORS origins
+_raw_origins = os.environ.get(
+    'ALLOWED_ORIGINS',
+    'http://localhost:5173,http://localhost:3000'
+)
+ALLOWED_ORIGINS: list[str] = [o.strip() for o in _raw_origins.split(',') if o.strip()]
 
 TEAM_MAPPING = {
     'IND': 'India',
@@ -14,10 +31,10 @@ TEAM_MAPPING = {
     'BAN': 'Bangladesh',
     'AFG': 'Afghanistan',
     'IRE': 'Ireland',
-    'SA': 'South Africa',
-    'SL': 'Sri Lanka',
-    'NZ': 'New Zealand',
-    'WI': 'West Indies',
+    'SA':  'South Africa',
+    'SL':  'Sri Lanka',
+    'NZ':  'New Zealand',
+    'WI':  'West Indies',
     'ZIM': 'Zimbabwe',
 }
 

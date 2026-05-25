@@ -1,6 +1,6 @@
-// Centralized API client.
-// Vite proxy forwards these to http://localhost:8000 — see vite.config.js
-const API = ''
+// API base URL — set VITE_API_URL in .env for local dev,
+// or in the Vite build environment for production.
+const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 async function json(url, opts) {
   const res = await fetch(url, opts)
@@ -29,7 +29,7 @@ export const api = {
 
   // Analysis
   batsmanVsBowler: (batsman, bowler) => {
-    const url = (bowler && bowler !== null && bowler !== '')
+    const url = bowler
       ? `${API}/analysis/batsman-vs-bowler?batsman=${encodeURIComponent(batsman)}&bowler=${encodeURIComponent(bowler)}`
       : `${API}/analysis/batsman-vs-bowler?batsman=${encodeURIComponent(batsman)}`
     return json(url)

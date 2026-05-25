@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List
 
+from config import ALLOWED_ORIGINS, MODEL_PATH
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -44,7 +46,7 @@ async def lifespan(app: FastAPI):
 
         # Load ML model — non-fatal if pkl not yet generated
         try:
-            predictor_service = PredictorService.from_pkl("cricket_match_predictor.pkl")
+            predictor_service = PredictorService.from_pkl(MODEL_PATH)
             logger.info("PredictorService loaded successfully")
         except FileNotFoundError:
             logger.warning(
@@ -68,14 +70,10 @@ app = FastAPI(
 )
 
 # Origins: wildcard covers all cases.
-# If you lock this down for production, add your deployed frontend URL here.
+# Origins are loaded from ALLOWED_ORIGINS env var (see config.py / .env)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "*",                         # dev / open deployment
-        "http://localhost:5173",     # Vite dev server
-        "http://localhost:4173",     # Vite preview
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

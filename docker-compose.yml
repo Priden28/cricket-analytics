@@ -1,0 +1,36 @@
+version: '3.9'
+
+services:
+
+  # ── FastAPI backend ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                        # your local .env with DB credentials
+    volumes:
+      # Mount pkl locally so you don't need to re-download from GCS during dev
+      - ./cricket_match_predictor.pkl:/app/cricket_match_predictor.pkl:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── React frontend ────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./cricket-analytics
+      dockerfile: ../Dockerfile.frontend
+      args:
+        # Points the built frontend at the backend
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.mypy_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Credentials and secrets
+.env
+.env.*
+*.json
+!package.json
+!package-lock.json
+
+# Model (downloaded from GCS at runtime, or mounted as volume)
+*.pkl
+*.joblib
+
+# Data
+*.csv
+
+# Git
+.git/
+.gitignore
+
+# React frontend (not needed in backend image)
+cricket-analytics/
+
+# Docker
+Dockerfile*
+docker-compose.yml
+nginx.conf
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

@@ -34,28 +34,41 @@ predictor_service  = None   # ML prediction service
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global cricket_service, db_manager, analytics_service, predictor_service
+    # Services are initialised lazily — we do NOT block startup on DB connection.
+    # Cloud Run health checks pass immediately; DB connects on first real request.
     try:
         from cricket_service   import CricketService
         from database          import DatabaseManager
         from analytics_service import AnalyticsService
         from predictor_service import PredictorService
 
-        db_manager        = DatabaseManager()
-        cricket_service   = CricketService()
-        analytics_service = AnalyticsService(db_manager)
+        # Import classes only — don't call DatabaseManager() here as it
+        # tries to connect to DB and blocks startup in Cloud Run.
+        db_manager        = DatabaseManager.__new__(DatabaseManager)
+        cricket_service   = CricketService.__new__(CricketService)
+        analytics_service = AnalyticsService.__new__(AnalyticsService)
 
-        # Load ML model — non-fatal if pkl not yet generated
-        try:
-            predictor_service = PredictorService.from_pkl(MODEL_PATH)
-            logger.info("PredictorService loaded successfully")
-        except FileNotFoundError:
-            logger.warning(
-                "cricket_match_predictor.pkl not found. "
-                "Run ML_First.py to train and save the model. "
-                "Match prediction endpoints will return 503 until then."
-            )
+        # Initialise in background thread so startup completes immediately
+        import threading
+        def _init():
+            global cricket_service, db_manager, analytics_service, predictor_service
+            try:
+                db_manager.__init__()
+                from cricket_service import CricketService as CS
+                cricket_service = CS()
+                from analytics_service import AnalyticsService as AS
+                analytics_service = AS(db_manager)
+                try:
+                    predictor_service = PredictorService.from_pkl(MODEL_PATH)
+                    logger.info("PredictorService loaded successfully")
+                except FileNotFoundError:
+                    logger.warning("pkl not found — prediction endpoints will return 503")
+                logger.info("All services initialised successfully")
+            except Exception as e:
+                logger.error(f"Background service init failed: {e}")
 
-        logger.info("All services initialised")
+        threading.Thread(target=_init, daemon=True).start()
+        logger.info("Startup complete — services initialising in background")
     except Exception as e:
         logger.error(f"Service init failed: {e}")
     yield

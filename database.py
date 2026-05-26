@@ -18,17 +18,28 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _pool: Optional[pg_pool.ThreadedConnectionPool] = None
 
-INSTANCE_CONNECTION_NAME = os.environ.get("INSTANCE_CONNECTION_NAME", "")
-
 
 def _get_pool() -> pg_pool.ThreadedConnectionPool:
     global _pool
+    # Read env var fresh every call — important because Cloud Run injects
+    # env vars after module import in some configurations.
+    instance_connection_name = os.environ.get("instance_connection_name", "")
+
+    # Reset pool if it was created with wrong method
+    if _pool is not None and instance_connection_name:
+        # Check if existing pool is a direct TCP pool (wrong method)
+        # by checking if the creator function is set
+        if not hasattr(_pool, '_creator'):
+            logger.info("Resetting direct TCP pool — Cloud SQL connector available")
+            _pool.closeall()
+            _pool = None
+
     if _pool is not None:
         return _pool
 
-    if INSTANCE_CONNECTION_NAME:
+    if instance_connection_name:
         # ── Cloud Run path: Cloud SQL Python Connector ────────────────────
-        logger.info(f"Using Cloud SQL connector for {INSTANCE_CONNECTION_NAME}")
+        logger.info(f"Using Cloud SQL connector for {instance_connection_name}")
         from google.cloud.sql.connector import Connector
         import pg8000
 
@@ -36,7 +47,7 @@ def _get_pool() -> pg_pool.ThreadedConnectionPool:
 
         def getconn():
             return connector.connect(
-                INSTANCE_CONNECTION_NAME,
+                instance_connection_name,
                 "pg8000",
                 user=DB_CONFIG["user"],
                 password=DB_CONFIG["password"],

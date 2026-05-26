@@ -10,7 +10,8 @@ env:
   GCP_REGION:       us-central1
   BACKEND_SERVICE:  cricket-backend
   FRONTEND_SERVICE: cricket-frontend
-  REGISTRY:         gcr.io
+  REGISTRY:         us-central1-docker.pkg.dev
+  REPO:             cricket-analytics
 
 jobs:
 
@@ -34,26 +35,26 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker --quiet
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       - name: Build backend image
         run: |
           docker build \
             -f Dockerfile.backend \
-            -t $REGISTRY/$GCP_PROJECT_ID/$BACKEND_SERVICE:$GITHUB_SHA \
-            -t $REGISTRY/$GCP_PROJECT_ID/$BACKEND_SERVICE:latest \
+            -t $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:$GITHUB_SHA \
+            -t $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:latest \
             .
 
       - name: Push backend image
         run: |
-          docker push $REGISTRY/$GCP_PROJECT_ID/$BACKEND_SERVICE:$GITHUB_SHA
-          docker push $REGISTRY/$GCP_PROJECT_ID/$BACKEND_SERVICE:latest
+          docker push $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:$GITHUB_SHA
+          docker push $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:latest
 
       - name: Deploy backend to Cloud Run
         run: |
           gcloud run deploy $BACKEND_SERVICE \
-            --image $REGISTRY/$GCP_PROJECT_ID/$BACKEND_SERVICE:$GITHUB_SHA \
+            --image $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:$GITHUB_SHA \
             --region $GCP_REGION \
             --platform managed \
             --allow-unauthenticated \
@@ -91,27 +92,27 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker --quiet
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       - name: Build frontend image
         run: |
           docker build \
             -f Dockerfile.frontend \
             --build-arg VITE_API_URL=${{ secrets.BACKEND_URL }} \
-            -t $REGISTRY/$GCP_PROJECT_ID/$FRONTEND_SERVICE:$GITHUB_SHA \
-            -t $REGISTRY/$GCP_PROJECT_ID/$FRONTEND_SERVICE:latest \
+            -t $REGISTRY/$GCP_PROJECT_ID/$REPO/$FRONTEND_SERVICE:$GITHUB_SHA \
+            -t $REGISTRY/$GCP_PROJECT_ID/$REPO/$FRONTEND_SERVICE:latest \
             ./cricket-analytics
 
       - name: Push frontend image
         run: |
-          docker push $REGISTRY/$GCP_PROJECT_ID/$FRONTEND_SERVICE:$GITHUB_SHA
-          docker push $REGISTRY/$GCP_PROJECT_ID/$FRONTEND_SERVICE:latest
+          docker push $REGISTRY/$GCP_PROJECT_ID/$REPO/$FRONTEND_SERVICE:$GITHUB_SHA
+          docker push $REGISTRY/$GCP_PROJECT_ID/$REPO/$FRONTEND_SERVICE:latest
 
       - name: Deploy frontend to Cloud Run
         run: |
           gcloud run deploy $FRONTEND_SERVICE \
-            --image $REGISTRY/$GCP_PROJECT_ID/$FRONTEND_SERVICE:$GITHUB_SHA \
+            --image $REGISTRY/$GCP_PROJECT_ID/$REPO/$FRONTEND_SERVICE:$GITHUB_SHA \
             --region $GCP_REGION \
             --platform managed \
             --allow-unauthenticated \

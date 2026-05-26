@@ -1,27 +1,58 @@
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Optional
 
-import psycopg2
-from psycopg2 import pool as pg_pool
 import pandas as pd
+from psycopg2 import pool as pg_pool
 
 from config import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Connection pool – created once at import time
+# Connection pool — created once at import time
+# Cloud Run: uses Cloud SQL Python Connector (IAM, no direct TCP needed)
+# Local:     uses standard psycopg2 TCP connection
 # ---------------------------------------------------------------------------
 _pool: Optional[pg_pool.ThreadedConnectionPool] = None
+
+INSTANCE_CONNECTION_NAME = os.environ.get("INSTANCE_CONNECTION_NAME", "")
 
 
 def _get_pool() -> pg_pool.ThreadedConnectionPool:
     global _pool
-    if _pool is None:
+    if _pool is not None:
+        return _pool
+
+    if INSTANCE_CONNECTION_NAME:
+        # ── Cloud Run path: Cloud SQL Python Connector ────────────────────
+        logger.info(f"Using Cloud SQL connector for {INSTANCE_CONNECTION_NAME}")
+        from google.cloud.sql.connector import Connector
+        import pg8000
+
+        connector = Connector()
+
+        def getconn():
+            return connector.connect(
+                INSTANCE_CONNECTION_NAME,
+                "pg8000",
+                user=DB_CONFIG["user"],
+                password=DB_CONFIG["password"],
+                db=DB_CONFIG["dbname"],
+            )
+
+        _pool = pg_pool.ThreadedConnectionPool(
+            minconn=1, maxconn=5, creator=getconn
+        )
+        logger.info("Cloud SQL connection pool created via connector")
+    else:
+        # ── Local path: direct TCP via psycopg2 ───────────────────────────
+        logger.info("Using direct TCP connection to PostgreSQL")
         _pool = pg_pool.ThreadedConnectionPool(minconn=1, maxconn=5, **DB_CONFIG)
         logger.info("PostgreSQL connection pool created (min=1, max=5)")
+
     return _pool
 
 
@@ -30,25 +61,8 @@ class DatabaseManager:
     def __init__(self):
         self.ensure_constraints()
 
-    # ------------------------------------------------------------------
-    # Constraints – must exist for ON CONFLICT DO NOTHING to work
-    # ------------------------------------------------------------------
-
     def ensure_constraints(self):
-        """
-        Idempotently add UNIQUE constraints to all three tables.
-        ON CONFLICT DO NOTHING is a no-op without them.
-        Safe to call multiple times – uses IF NOT EXISTS logic via
-        a DO $$ block so it won't error if the constraint already exists.
-
-        Constraint philosophy: identify a *specific innings* by every
-        observable column, so that two genuinely different innings that
-        happen to share some values (e.g. two players scoring 50 at the
-        same ground on the same day) are never collapsed into one row.
-        """
         statements = [
-            # Drop old, too-narrow constraint if it exists, then add the
-            # corrected one.  DROP … IF EXISTS is safe to re-run.
             """
             DO $$ BEGIN
                 IF EXISTS (
@@ -105,10 +119,6 @@ class DatabaseManager:
         finally:
             self.release(conn, cursor)
 
-    # ------------------------------------------------------------------
-    # Connection helpers
-    # ------------------------------------------------------------------
-
     def get_connection(self):
         for attempt in range(5):
             try:
@@ -133,10 +143,6 @@ class DatabaseManager:
                 _get_pool().putconn(conn)
         except Exception:
             pass
-
-    # ------------------------------------------------------------------
-    # Read helpers
-    # ------------------------------------------------------------------
 
     def fetch_latest_date(self, table_name: str) -> Optional[datetime]:
         conn, cursor = self.get_connection()
@@ -211,18 +217,14 @@ class DatabaseManager:
             self.release(conn, cursor)
 
     def fetch_all(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Fetch all three tables in one shot for analytics."""
         conn, cursor = self.get_connection()
         try:
             cursor.execute('SELECT * FROM team')
             df_team = pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in cursor.description])
-
             cursor.execute('SELECT * FROM batting')
             df_batting = pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in cursor.description])
-
             cursor.execute('SELECT * FROM bowling')
             df_bowling = pd.DataFrame(cursor.fetchall(), columns=[d[0] for d in cursor.description])
-
             return df_team, df_batting, df_bowling
         except Exception as e:
             logger.error(f"fetch_all: {e}")
@@ -230,14 +232,9 @@ class DatabaseManager:
         finally:
             self.release(conn, cursor)
 
-    # ------------------------------------------------------------------
-    # Bulk inserts  (ON CONFLICT DO NOTHING = PostgreSQL's INSERT IGNORE)
-    # ------------------------------------------------------------------
-
     def bulk_insert_team(self, records: list[tuple]) -> int:
         if not records:
             return 0
-        # execute_values uses %s as a single placeholder for a whole row tuple
         query = """
             INSERT INTO team
                 ("Team", "ScoreDescending", "Overs", "RPO", "Lead", "Inns",
@@ -272,23 +269,12 @@ class DatabaseManager:
         return self._bulk_execute(query, records, "bowling")
 
     def _bulk_execute(self, query: str, records: list[tuple], label: str) -> int:
-        """
-        Execute a bulk INSERT … ON CONFLICT DO NOTHING and return the
-        number of rows *actually* inserted.
-
-        psycopg2's executemany sets cursor.rowcount to the result of only
-        the *last* statement, so it cannot be used to count total inserts.
-        Instead we append RETURNING 1 and count the returned rows, which
-        gives an exact tally regardless of batch size.
-        """
         conn, cursor = self.get_connection()
         try:
             from psycopg2.extras import execute_values
-
             returning_query = query.rstrip().rstrip(";")
             if "RETURNING" not in returning_query.upper():
                 returning_query += " RETURNING 1"
-
             execute_values(cursor, returning_query, records, page_size=500)
             inserted = len(cursor.fetchall())
             skipped = len(records) - inserted

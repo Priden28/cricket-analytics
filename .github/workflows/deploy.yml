@@ -70,8 +70,8 @@ jobs:
             --set-env-vars="GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}" \
             --set-env-vars="GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" \
             --set-env-vars="ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }}" \
-            --set-env-vars="INSTANCE_CONNECTION_NAME=${{ secrets.INSTANCE_CONNECTION_NAME }}" \
-            --add-cloudsql-instances="${{ secrets.INSTANCE_CONNECTION_NAME }}"
+            --set-env-vars="INSTANCE_CONNECTION_NAME=project-d8082c68-1091-4d69-a0e:us-central1:cricket-db" \
+            --add-cloudsql-instances="project-d8082c68-1091-4d69-a0e:us-central1:cricket-db"
 
   deploy-frontend:
     name: Build & Deploy Frontend

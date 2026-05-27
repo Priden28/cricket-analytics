@@ -5,65 +5,58 @@ from datetime import datetime
 from typing import Optional
 
 import pandas as pd
-from psycopg2 import pool as pg_pool
 
 from config import DB_CONFIG
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Connection pool — created once at import time
-# Cloud Run: uses Cloud SQL Python Connector (IAM, no direct TCP needed)
-# Local:     uses standard psycopg2 TCP connection
+# Connection pool
 # ---------------------------------------------------------------------------
-_pool: Optional[pg_pool.ThreadedConnectionPool] = None
+_pool = None
+_use_connector = bool(os.environ.get("INSTANCE_CONNECTION_NAME", ""))
+
+logger.info(f"Database mode: {'Cloud SQL connector' if _use_connector else 'direct TCP'}")
+logger.info(f"INSTANCE_CONNECTION_NAME = '{os.environ.get('INSTANCE_CONNECTION_NAME', '')}'")
 
 
-def _get_pool() -> pg_pool.ThreadedConnectionPool:
-    global _pool
-    # Read env var fresh every call — important because Cloud Run injects
-    # env vars after module import in some configurations.
-    instance_connection_name = os.environ.get("instance_connection_name", "")
+def _make_pool():
+    global _pool, _use_connector
+    # Re-read env var in case it was set after module import
+    icn = os.environ.get("INSTANCE_CONNECTION_NAME", "")
+    _use_connector = bool(icn)
 
-    # Reset pool if it was created with wrong method
-    if _pool is not None and instance_connection_name:
-        # Check if existing pool is a direct TCP pool (wrong method)
-        # by checking if the creator function is set
-        if not hasattr(_pool, '_creator'):
-            logger.info("Resetting direct TCP pool — Cloud SQL connector available")
-            _pool.closeall()
-            _pool = None
-
-    if _pool is not None:
-        return _pool
-
-    if instance_connection_name:
-        # ── Cloud Run path: Cloud SQL Python Connector ────────────────────
-        logger.info(f"Using Cloud SQL connector for {instance_connection_name}")
+    if _use_connector:
+        logger.info(f"Creating Cloud SQL connector pool for {icn}")
         from google.cloud.sql.connector import Connector
         import pg8000
-
         connector = Connector()
 
         def getconn():
             return connector.connect(
-                instance_connection_name,
+                icn,
                 "pg8000",
                 user=DB_CONFIG["user"],
                 password=DB_CONFIG["password"],
                 db=DB_CONFIG["dbname"],
             )
 
-        _pool = pg_pool.ThreadedConnectionPool(
-            minconn=1, maxconn=5, creator=getconn
-        )
-        logger.info("Cloud SQL connection pool created via connector")
+        import psycopg2.pool as pg_pool
+        _pool = pg_pool.ThreadedConnectionPool(minconn=1, maxconn=5, creator=getconn)
+        logger.info("Cloud SQL connector pool created")
     else:
-        # ── Local path: direct TCP via psycopg2 ───────────────────────────
-        logger.info("Using direct TCP connection to PostgreSQL")
+        logger.info(f"Creating direct TCP pool to {DB_CONFIG['host']}:{DB_CONFIG['port']}")
+        import psycopg2.pool as pg_pool
         _pool = pg_pool.ThreadedConnectionPool(minconn=1, maxconn=5, **DB_CONFIG)
-        logger.info("PostgreSQL connection pool created (min=1, max=5)")
+        logger.info("Direct TCP pool created")
 
+    return _pool
+
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        _make_pool()
     return _pool
 
 
@@ -122,7 +115,7 @@ class DatabaseManager:
             for stmt in statements:
                 cursor.execute(stmt)
             conn.commit()
-            logger.info("Unique constraints verified/created on team, batting, bowling")
+            logger.info("Unique constraints verified/created")
         except Exception as e:
             conn.rollback()
             logger.error(f"ensure_constraints failed: {e}")
@@ -133,7 +126,8 @@ class DatabaseManager:
     def get_connection(self):
         for attempt in range(5):
             try:
-                conn = _get_pool().getconn()
+                pool = _get_pool()
+                conn = pool.getconn()
                 conn.autocommit = False
                 cursor = conn.cursor()
                 return conn, cursor
@@ -288,12 +282,8 @@ class DatabaseManager:
                 returning_query += " RETURNING 1"
             execute_values(cursor, returning_query, records, page_size=500)
             inserted = len(cursor.fetchall())
-            skipped = len(records) - inserted
             conn.commit()
-            logger.info(
-                f"bulk_insert {label}: {inserted} rows inserted, "
-                f"{skipped} duplicates skipped (total attempted: {len(records)})"
-            )
+            logger.info(f"bulk_insert {label}: {inserted} rows inserted")
             return inserted
         except Exception as e:
             conn.rollback()

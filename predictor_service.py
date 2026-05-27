@@ -63,10 +63,25 @@ class PredictorService:
         """
         path = Path(pkl_path)
         if not path.exists():
-            raise FileNotFoundError(
-                f"Model file not found: {pkl_path}\n"
-                "Run ML_First.py first to train and save the model."
-            )
+            import os
+            bucket = os.environ.get("GCS_BUCKET_NAME", "")
+            if bucket:
+                try:
+                    from google.cloud import storage
+                    logger.info(f"Downloading model from GCS bucket {bucket}...")
+                    client = storage.Client()
+                    blob = client.bucket(bucket).blob("cricket_match_predictor.pkl")
+                    blob.download_to_filename(pkl_path)
+                    logger.info("Model downloaded from GCS successfully")
+                except Exception as e:
+                    raise FileNotFoundError(
+                        f"Model not found locally and GCS download failed: {e}"
+                    )
+            else:
+                raise FileNotFoundError(
+                    f"Model file not found: {pkl_path}\n"
+                    "Run ML_First.py first to train and save the model."
+                )
 
         logger.info(f"Loading model from {pkl_path} ...")
         saved = joblib.load(pkl_path)

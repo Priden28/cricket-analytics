@@ -296,13 +296,33 @@ class DatabaseManager:
     def _bulk_execute(self, query: str, records: list[tuple], label: str) -> int:
         conn, cursor = self.get_connection()
         try:
-            from psycopg2.extras import execute_values
-            returning_query = query.rstrip().rstrip(";")
-            if "RETURNING" not in returning_query.upper():
-                returning_query += " RETURNING 1"
-            execute_values(cursor, returning_query, records, page_size=500)
-            inserted = len(cursor.fetchall())
-            conn.commit()
+            if _is_connector():
+                # pg8000 path — execute_values not available, use executemany
+                # Strip RETURNING and VALUES %s, build individual inserts
+                base_query = query.rstrip().rstrip(";")
+                # Replace VALUES %s with VALUES (%s, %s, ...) for one row
+                n_cols = len(records[0])
+                placeholders = "(" + ",".join(["%s"] * n_cols) + ")"
+                single_query = base_query.replace("VALUES %s", f"VALUES {placeholders}")
+                if "RETURNING" not in single_query.upper():
+                    single_query += " RETURNING 1"
+                inserted = 0
+                for record in records:
+                    try:
+                        cursor.execute(single_query, record)
+                        if cursor.fetchone():
+                            inserted += 1
+                    except Exception:
+                        pass  # duplicate — skip
+                conn.commit()
+            else:
+                from psycopg2.extras import execute_values
+                returning_query = query.rstrip().rstrip(";")
+                if "RETURNING" not in returning_query.upper():
+                    returning_query += " RETURNING 1"
+                execute_values(cursor, returning_query, records, page_size=500)
+                inserted = len(cursor.fetchall())
+                conn.commit()
             logger.info(f"bulk_insert {label}: {inserted} rows inserted")
             return inserted
         except Exception as e:

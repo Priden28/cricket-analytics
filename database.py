@@ -29,13 +29,17 @@ def _make_pool():
     _use_connector = bool(icn)
 
     if _use_connector:
-        logger.info(f"Creating Cloud SQL connector pool for {icn}")
+        logger.info(f"Using Cloud SQL connector for {icn}")
         from google.cloud.sql.connector import Connector
         import pg8000
-        connector = Connector()
+        import threading
 
-        def getconn():
-            return connector.connect(
+        _connector = Connector()
+        _conn_lock = threading.Lock()
+        _conn_list = []
+
+        def _get_connector_conn():
+            return _connector.connect(
                 icn,
                 "pg8000",
                 user=DB_CONFIG["user"],
@@ -43,9 +47,9 @@ def _make_pool():
                 db=DB_CONFIG["dbname"],
             )
 
-        import psycopg2.pool as pg_pool
-        _pool = pg_pool.ThreadedConnectionPool(minconn=1, maxconn=5, creator=getconn)
-        logger.info("Cloud SQL connector pool created")
+        # Store connector function as a marker — pool is None for connector path
+        _pool = _get_connector_conn  # callable, not a pool
+        logger.info("Cloud SQL connector ready")
     else:
         logger.info(f"Creating direct TCP pool to {DB_CONFIG['host']}:{DB_CONFIG['port']}")
         import psycopg2.pool as pg_pool
@@ -60,6 +64,11 @@ def _get_pool():
     if _pool is None:
         _make_pool()
     return _pool
+
+
+def _is_connector():
+    """True when using Cloud SQL connector (pool is a callable, not a pool object)."""
+    return callable(_pool)
 
 
 class DatabaseManager:
@@ -128,10 +137,16 @@ class DatabaseManager:
     def get_connection(self):
         for attempt in range(5):
             try:
-                pool = _get_pool()
-                conn = pool.getconn()
-                conn.autocommit = False
-                cursor = conn.cursor()
+                _get_pool()  # ensure pool is initialised
+                if _is_connector():
+                    # Cloud SQL connector — create a fresh connection each time
+                    conn = _pool()
+                    conn.autocommit = False
+                    cursor = conn.cursor()
+                else:
+                    conn = _pool.getconn()
+                    conn.autocommit = False
+                    cursor = conn.cursor()
                 return conn, cursor
             except Exception as e:
                 logger.warning(f"Pool getconn attempt {attempt + 1} failed: {e}")
@@ -147,7 +162,10 @@ class DatabaseManager:
             pass
         try:
             if conn:
-                _get_pool().putconn(conn)
+                if _is_connector():
+                    conn.close()  # connector connections are not pooled
+                else:
+                    _pool.putconn(conn)
         except Exception:
             pass
 

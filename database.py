@@ -16,8 +16,10 @@ logger = logging.getLogger(__name__)
 _pool = None
 _use_connector = bool(os.environ.get("INSTANCE_CONNECTION_NAME", ""))
 
+_icn_debug = os.environ.get("INSTANCE_CONNECTION_NAME", "NOT_SET")
+logger.info(f"DATABASE INIT — INSTANCE_CONNECTION_NAME='{_icn_debug}'")
+logger.info(f"DATABASE INIT — all env keys: {[k for k in os.environ.keys() if 'INSTANCE' in k or 'SQL' in k or 'DB' in k]}")
 logger.info(f"Database mode: {'Cloud SQL connector' if _use_connector else 'direct TCP'}")
-logger.info(f"INSTANCE_CONNECTION_NAME = '{os.environ.get('INSTANCE_CONNECTION_NAME', '')}'")
 
 
 def _make_pool():

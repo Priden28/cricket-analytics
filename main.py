@@ -52,12 +52,14 @@ async def lifespan(app: FastAPI):
         import threading
         def _init():
             global cricket_service, db_manager, analytics_service, predictor_service
+
             # Load predictor independently — does not need DB
+            logger.info(f"Loading predictor from {MODEL_PATH}...")
             try:
                 predictor_service = PredictorService.from_pkl(MODEL_PATH)
                 logger.info("PredictorService loaded successfully")
             except Exception as e:
-                logger.warning(f"PredictorService failed to load: {e}")
+                logger.error(f"PredictorService failed to load: {e}")
 
             # Initialise DB-dependent services
             try:
@@ -65,10 +67,15 @@ async def lifespan(app: FastAPI):
                 from cricket_service import CricketService as CS
                 cricket_service = CS()
                 from analytics_service import AnalyticsService as AS
+                # Pass db_manager explicitly
+                svc = AS.__new__(AS)
+                svc.db_manager = db_manager
+                analytics_service = svc
+                # Re-create properly
                 analytics_service = AS(db_manager)
                 logger.info("All DB services initialised successfully")
             except Exception as e:
-                logger.error(f"Background service init failed: {e}")
+                logger.error(f"Background DB service init failed: {e}")
 
         threading.Thread(target=_init, daemon=True).start()
         logger.info("Startup complete — services initialising in background")

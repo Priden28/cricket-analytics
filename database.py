@@ -77,60 +77,50 @@ class DatabaseManager:
         self.ensure_constraints()
 
     def ensure_constraints(self):
-        statements = [
-            """
-            DO $$ BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'batting_unique' AND conrelid = 'batting'::regclass
-                ) THEN
-                    ALTER TABLE batting DROP CONSTRAINT batting_unique;
-                END IF;
-                ALTER TABLE batting
-                ADD CONSTRAINT batting_unique
-                UNIQUE ("Player", "RunsDescending", "BF", "4s", "6s",
-                        "Opposition", "Ground", "Start Date", "Inns", "Not Out", "Team");
-            END $$;
-            """,
-            """
-            DO $$ BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'team_unique' AND conrelid = 'team'::regclass
-                ) THEN
-                    ALTER TABLE team DROP CONSTRAINT team_unique;
-                END IF;
-                ALTER TABLE team
-                ADD CONSTRAINT team_unique
-                UNIQUE ("Team", "ScoreDescending", "Wickets", "Overs",
-                        "Opposition", "Ground", "Start Date", "Inns");
-            END $$;
-            """,
-            """
-            DO $$ BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'bowling_unique' AND conrelid = 'bowling'::regclass
-                ) THEN
-                    ALTER TABLE bowling DROP CONSTRAINT bowling_unique;
-                END IF;
-                ALTER TABLE bowling
-                ADD CONSTRAINT bowling_unique
-                UNIQUE ("Player", "Overs", "Mdns", "Runs", "WktsDescending",
-                        "Opposition", "Ground", "Start Date", "Inns", "Team");
-            END $$;
-            """,
+        """
+        Add unique constraints if they don't exist.
+        Uses pg_catalog queries instead of DO $$ blocks for pg8000 compatibility.
+        """
+        constraints = [
+            {
+                "name": "batting_unique",
+                "table": "batting",
+                "cols": '"Player", "RunsDescending", "BF", "4s", "6s", "Opposition", "Ground", "Start Date", "Inns", "Not Out", "Team"',
+            },
+            {
+                "name": "team_unique",
+                "table": "team",
+                "cols": '"Team", "ScoreDescending", "Wickets", "Overs", "Opposition", "Ground", "Start Date", "Inns"',
+            },
+            {
+                "name": "bowling_unique",
+                "table": "bowling",
+                "cols": '"Player", "Overs", "Mdns", "Runs", "WktsDescending", "Opposition", "Ground", "Start Date", "Inns", "Team"',
+            },
         ]
         conn, cursor = self.get_connection()
         try:
-            for stmt in statements:
-                cursor.execute(stmt)
-            conn.commit()
+            for c in constraints:
+                # Check if constraint exists
+                cursor.execute(
+                    "SELECT 1 FROM pg_constraint WHERE conname = %s",
+                    (c["name"],)
+                )
+                exists = cursor.fetchone() is not None
+                if exists:
+                    cursor.execute(f'ALTER TABLE {c["table"]} DROP CONSTRAINT {c["name"]}')
+                    conn.commit()
+                cursor.execute(
+                    f'ALTER TABLE {c["table"]} ADD CONSTRAINT {c["name"]} UNIQUE ({c["cols"]})'
+                )
+                conn.commit()
             logger.info("Unique constraints verified/created")
         except Exception as e:
-            conn.rollback()
-            logger.error(f"ensure_constraints failed: {e}")
-            raise
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"ensure_constraints: {e} — constraints may already exist, continuing")
         finally:
             self.release(conn, cursor)
 

@@ -28,15 +28,8 @@ FROM base AS app
 
 WORKDIR /app
 
-# Copy application code
-COPY analytics_service.py .
-COPY config.py .
-COPY cricket_service.py .
-COPY data_processor.py .
-COPY database.py .
-COPY main.py .
-COPY predictor_service.py .
-COPY web_scraper.py .
+# Copy application code — copy all Python files together so any change busts this layer
+COPY *.py ./
 
 # Model file is downloaded from GCS at startup — not baked into the image.
 # If running locally with a pkl file, mount it as a volume:

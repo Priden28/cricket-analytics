@@ -40,7 +40,7 @@ jobs:
 
       - name: Build backend image
         run: |
-          docker build \
+          docker build --no-cache \
             -f Dockerfile.backend \
             -t $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:$GITHUB_SHA \
             -t $REGISTRY/$GCP_PROJECT_ID/$REPO/$BACKEND_SERVICE:latest \
